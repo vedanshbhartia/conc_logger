@@ -1,0 +1,13 @@
+# build outputs
+conc_logger
+bench_throughput
+
+# logs
+*.log
+
+# editor / OS junk
+.vscode/
+.idea/
+*.swp
+*~
+.DS_Store

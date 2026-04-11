@@ -1,0 +1,53 @@
+Machine: vedansh-ThinkPad-T16-Gen-2
+Kernel:  6.5.0-1016-oem
+Date:    2026-04-11
+Flags:   -std=c++17 -O2 -fopenmp
+Msgs per thread: 50000
+
+=== throughput (msgs/sec) ===
+
+variant,threads,msgs_per_thread,total_msgs,throughput_mps
+conc_logger,1,50000,50000,1389663
+naive,1,50000,50000,16307712
+spdlog,1,50000,50000,1360164
+conc_logger,2,50000,100000,1688011
+naive,2,50000,100000,14999549
+spdlog,2,50000,100000,2157453
+conc_logger,4,50000,200000,2146533
+naive,4,50000,200000,13844925
+spdlog,4,50000,200000,2330209
+conc_logger,8,50000,400000,2624340
+naive,8,50000,400000,15511736
+spdlog,8,50000,400000,821627
+conc_logger,16,50000,800000,2116985
+naive,16,50000,800000,12462352
+spdlog,16,50000,800000,647697
+
+=== perf counters (4 threads, per variant) ===
+
+-- conc_logger --
+         1,790,395      cache-misses          #   14.74% of all cache refs
+        12,143,491      cache-references
+        30,409,775      stalled-cycles-frontend  #  5.00% frontend cycles idle
+       103,360,225      stalled-cycles-backend   # 16.99% backend cycles idle
+       697,008,494      instructions          #    1.15  insn per cycle
+       608,302,861      cycles
+       0.063738682 seconds time elapsed
+
+-- naive --
+           407,896      cache-misses          #   35.09% of all cache refs
+         1,162,584      cache-references
+         5,653,604      stalled-cycles-frontend  #  4.22% frontend cycles idle
+        31,334,035      stalled-cycles-backend   # 23.41% backend cycles idle
+       123,515,121      instructions          #    0.92  insn per cycle
+       133,860,036      cycles
+       0.013491053 seconds time elapsed
+
+-- spdlog --
+         3,868,860      cache-misses          #   16.00% of all cache refs
+        24,187,762      cache-references
+        29,721,829      stalled-cycles-frontend  #  3.22% frontend cycles idle
+       164,762,374      stalled-cycles-backend   # 17.83% backend cycles idle
+       669,197,560      instructions          #    0.72  insn per cycle
+       923,858,303      cycles
+       0.110441159 seconds time elapsed
