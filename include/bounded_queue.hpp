@@ -33,10 +33,17 @@ public:
                     break;
             }
         }
-
-        data_.push_back(std::move(item));
-        lk.unlock();
-        not_empty_.notify_one();
+        // Initial code with bug
+        // data_.push_back(std::move(item));
+        // lk.unlock();
+        // not_empty_.notify_one();
+        
+        // Fixed code
+        bool was_empty = data_.empty();
+        data_.push_back(std::move(item));                                                                                                                                                                                
+        lk.unlock();                                                                                                                                                                                                     
+        if (was_empty)                                                                                                                                                                                                   
+            not_empty_.notify_one();   // only wake consumer when queue was empty
         return undelivered;
     }
 
