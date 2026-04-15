@@ -29,10 +29,16 @@
 #include <string>
 #include <thread>
 
+#ifndef IO_US
+#  define IO_US 20   // simulated I/O latency in microseconds (override with -DIO_US=<N>)
+#endif
+
 #ifdef HAVE_SPDLOG
 #include <spdlog/spdlog.h>
 #include <spdlog/async.h>
 #include <spdlog/sinks/null_sink.h>
+#include <spdlog/sinks/basic_file_sink.h>
+#include <spdlog/sinks/base_sink.h>
 #endif
 
 // Null sink for conc_logger - throws everything away so I/O never skews numbers
@@ -112,6 +118,85 @@ static double bench_spdlog(int nthreads, int nmsgs) {
     double elapsed = std::chrono::duration<double>(wall_clock::now() - t0).count();
     return (nthreads * nmsgs) / elapsed;
 }
+
+// Custom spdlog sink that sleeps IO_US microsecs per write, mirroring
+// SimulatedSlowSink above so the three slow-sink variants are directly comparable.
+template <typename Mutex>
+class SpdlogSlowSink : public spdlog::sinks::base_sink<Mutex> {
+protected:
+    void sink_it_(const spdlog::details::log_msg& msg) override {
+        std::this_thread::sleep_for(std::chrono::microseconds(IO_US));
+        sink_hole_ ^= static_cast<uint8_t>(msg.payload.size());
+    }
+    void flush_() override {}
+private:
+    volatile uint8_t sink_hole_{0};
+};
+using SpdlogSlowSink_mt = SpdlogSlowSink<std::mutex>;
+
+static double bench_spdlog_file(int nthreads, int nmsgs) {
+    const std::string path = "/tmp/bench_spdlog_file.log";
+    spdlog::init_thread_pool(1 << 17, 1);
+    auto sink   = std::make_shared<spdlog::sinks::basic_file_sink_mt>(path, /*truncate=*/true);
+    auto logger = std::make_shared<spdlog::async_logger>(
+        "bench_file", sink, spdlog::thread_pool(),
+        spdlog::async_overflow_policy::block);
+
+    auto t0 = wall_clock::now();
+    #pragma omp parallel num_threads(nthreads)
+    {
+        for (int i = 0; i < nmsgs; ++i)
+            logger->info("msg {}", i);
+    }
+    logger->flush();
+    spdlog::drop("bench_file");
+
+    double elapsed = std::chrono::duration<double>(wall_clock::now() - t0).count();
+    std::remove(path.c_str());
+    return (nthreads * nmsgs) / elapsed;
+}
+
+static double bench_spdlog_slowsink_producer(int nthreads, int nmsgs) {
+    spdlog::init_thread_pool(1 << 17, 1);
+    auto sink   = std::make_shared<SpdlogSlowSink_mt>();
+    auto logger = std::make_shared<spdlog::async_logger>(
+        "bench_slow_p", sink, spdlog::thread_pool(),
+        spdlog::async_overflow_policy::block);
+
+    auto t0 = wall_clock::now();
+    #pragma omp parallel num_threads(nthreads)
+    {
+        for (int i = 0; i < nmsgs; ++i)
+            logger->info("msg {}", i);
+    }
+    // Measure only producer enqueue time — background thread continues draining.
+    double producer_elapsed =
+        std::chrono::duration<double>(wall_clock::now() - t0).count();
+
+    logger->flush();   // drain before destruction, outside the timed window
+    spdlog::drop("bench_slow_p");
+    return (nthreads * nmsgs) / producer_elapsed;
+}
+
+static double bench_spdlog_slowsink_total(int nthreads, int nmsgs) {
+    spdlog::init_thread_pool(1 << 17, 1);
+    auto sink   = std::make_shared<SpdlogSlowSink_mt>();
+    auto logger = std::make_shared<spdlog::async_logger>(
+        "bench_slow_t", sink, spdlog::thread_pool(),
+        spdlog::async_overflow_policy::block);
+
+    auto t0 = wall_clock::now();
+    #pragma omp parallel num_threads(nthreads)
+    {
+        for (int i = 0; i < nmsgs; ++i)
+            logger->info("msg {}", i);
+    }
+    logger->flush();   // includes full background drain time
+
+    double elapsed = std::chrono::duration<double>(wall_clock::now() - t0).count();
+    spdlog::drop("bench_slow_t");
+    return (nthreads * nmsgs) / elapsed;
+}
 #endif
 
 // ── FileSink variants ─────────────────────────────────────────────────────────
@@ -129,10 +214,6 @@ static double bench_spdlog(int nthreads, int nmsgs) {
 //   every thread serialises on both formatting and I/O latency.
 // conc_file/conc_slowsink:  application threads only enqueue (sub-microsecs);
 //   the dedicated background thread owns all I/O.
-
-#ifndef IO_US
-#  define IO_US 20   // simulated I/O latency in microseconds
-#endif
 
 // A sink that sleeps IO_US microsecs on every write to model real disk I/O latency.
 // It also appends to an in-memory string so the compiler cannot optimise the
@@ -337,6 +418,9 @@ int main(int argc, char** argv) {
     // ── real FileSink variants (tmpfs — models buffered page-cache writes) ─────
     if (want("conc_file"))       report("conc_file",       bench_conc_file(nthreads, nmsgs));
     if (want("naive_file"))      report("naive_file",      bench_naive_file(nthreads, nmsgs));
+#ifdef HAVE_SPDLOG
+    if (want("spdlog_file"))     report("spdlog_file",     bench_spdlog_file(nthreads, nmsgs));
+#endif
 
     // ── simulated-slow-sink variants (IO_US microsecs per write, default 20 microsecs) ─────
     // *_producer: time until app threads finish their log() calls.
@@ -346,6 +430,10 @@ int main(int argc, char** argv) {
     if (want("conc_slowsink_producer"))  report("conc_slowsink_producer",  bench_conc_slowsink_producer(nthreads, nmsgs));
     if (want("naive_slowsink_total"))    report("naive_slowsink_total",    bench_naive_slowsink_total(nthreads, nmsgs));
     if (want("conc_slowsink_total"))     report("conc_slowsink_total",     bench_conc_slowsink_total(nthreads, nmsgs));
+#ifdef HAVE_SPDLOG
+    if (want("spdlog_slowsink_producer")) report("spdlog_slowsink_producer", bench_spdlog_slowsink_producer(nthreads, nmsgs));
+    if (want("spdlog_slowsink_total"))    report("spdlog_slowsink_total",    bench_spdlog_slowsink_total(nthreads, nmsgs));
+#endif
 
     return 0;
 }
