@@ -1,5 +1,5 @@
 CXX      := g++
-CXXFLAGS := -std=c++17 -Wall -Wextra -fopenmp -O2
+CXXFLAGS := -std=c++17 -Wall -Wextra -fopenmp
 INCLUDES := -I include
 
 SRC      := src/logger.cpp
@@ -11,7 +11,8 @@ BENCH_BIN := bench_throughput
 
 # opt-in spdlog: make bench SPDLOG=1
 ifdef SPDLOG
-SPDLOG_FLAGS := -DHAVE_SPDLOG $(shell pkg-config --cflags --libs spdlog 2>/dev/null || echo "-lspdlog")
+SPDLOG_FLAGS := -DHAVE_SPDLOG -I/usr/include
+SPDLOG_LIBS  :=
 endif
 
 .PHONY: all clean run bench
