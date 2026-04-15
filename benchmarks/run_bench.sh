@@ -6,6 +6,7 @@ set -e
 
 BIN=./bench_throughput
 MSGS=50000
+SLOW_MSGS=2000    # slow-sink variants: each msg costs IO_US microsecs, so keep count low
 THREADS=(1 2 4 8 16)
 PERF_THREADS=4
 
@@ -14,10 +15,53 @@ if [ ! -f "$BIN" ]; then
     exit 1
 fi
 
-echo "=== throughput sweep ==="
+# Detect which variants are compiled in by doing a dry run with 1 msg
+NULL_VARIANTS=("conc_logger" "naive")
+
+if $BIN 1 1 "$v" 2>/dev/null | grep -q "^${v},"; then
+        NULL_VARIANTS+=("$v")
+fi
+
+# File-sink variants are always compiled in (no optional flag needed)
+FILE_VARIANTS=("conc_file" "naive_file")
+
+echo "Active null-sink variants: ${NULL_VARIANTS[*]}"
+echo "Active file-sink variants: ${FILE_VARIANTS[*]}"
+echo ""
+
+echo "=== null-sink throughput sweep (queue/lock overhead only) ==="
 echo "variant,threads,msgs_per_thread,total_msgs,throughput_mps"
 for t in "${THREADS[@]}"; do
-    $BIN "$t" "$MSGS" | tail -n +2
+    for v in "${NULL_VARIANTS[@]}"; do
+        $BIN "$t" "$MSGS" "$v" | tail -n +2
+    done
+done
+
+echo ""
+echo "=== file-sink throughput sweep (tmpfs/page-cache writes) ==="
+echo "variant,threads,msgs_per_thread,total_msgs,throughput_mps"
+for t in "${THREADS[@]}"; do
+    for v in "${FILE_VARIANTS[@]}"; do
+        $BIN "$t" "$MSGS" "$v" | tail -n +2
+    done
+done
+
+echo ""
+echo "=== simulated-slow-sink: producer throughput (${IO_US:-20} µs/write, time until app threads are free) ==="
+echo "=== naive: producers blocked for full I/O   conc: producers return after sub-µs enqueue ==="
+echo "variant,threads,msgs_per_thread,total_msgs,throughput_mps"
+for t in "${THREADS[@]}"; do
+    $BIN "$t" "$SLOW_MSGS" naive_slowsink_producer | tail -n +2
+    $BIN "$t" "$SLOW_MSGS" conc_slowsink_producer  | tail -n +2
+done
+
+echo ""
+echo "=== simulated-slow-sink: total throughput (includes background drain / flush) ==="
+echo "=== both pay same I/O cost; difference shows in producer latency above ==="
+echo "variant,threads,msgs_per_thread,total_msgs,throughput_mps"
+for t in "${THREADS[@]}"; do
+    $BIN "$t" "$SLOW_MSGS" naive_slowsink_total | tail -n +2
+    $BIN "$t" "$SLOW_MSGS" conc_slowsink_total  | tail -n +2
 done
 
 # perf is kernel-version specific; try a few known paths before giving up
@@ -31,11 +75,15 @@ for p in perf \
     fi
 done
 
+ALL_VARIANTS=("${NULL_VARIANTS[@]}" "${FILE_VARIANTS[@]}"
+              "naive_slowsink_producer" "conc_slowsink_producer"
+              "naive_slowsink_total"    "conc_slowsink_total")
+
 if [ -n "$PERF" ]; then
     echo ""
     echo "=== perf counters ($PERF_THREADS threads, per variant) ==="
     EVENTS="cache-misses,cache-references,stalled-cycles-frontend,stalled-cycles-backend,instructions,cycles"
-    for variant in conc_logger naive spdlog; do
+    for variant in "${ALL_VARIANTS[@]}"; do
         echo ""
         echo "-- $variant --"
         "$PERF" stat -e "$EVENTS" \
