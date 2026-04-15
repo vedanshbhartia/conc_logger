@@ -7,8 +7,8 @@ set -e
 BIN=./bench_throughput
 MSGS=50000
 SLOW_MSGS=2000    # slow-sink variants: each msg costs IO_US microsecs, so keep count low
-THREADS=(1 2 4 8 16)
-PERF_THREADS=4
+THREADS=(1 2 4 8 16 32 64 128)
+PERF_THREADS=16
 
 if [ ! -f "$BIN" ]; then
     echo "build first: make bench SPDLOG=1"
