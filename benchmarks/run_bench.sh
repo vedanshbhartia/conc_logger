@@ -47,8 +47,8 @@ for t in "${THREADS[@]}"; do
 done
 
 echo ""
-echo "=== simulated-slow-sink: producer throughput (${IO_US:-20} µs/write, time until app threads are free) ==="
-echo "=== naive: producers blocked for full I/O   conc: producers return after sub-µs enqueue ==="
+echo "=== simulated-slow-sink: producer throughput (${IO_US:-20} microsecs/write, time until app threads are free) ==="
+echo "=== naive: producers blocked for full I/O   conc: producers return after sub-microsecs enqueue ==="
 echo "variant,threads,msgs_per_thread,total_msgs,throughput_mps"
 for t in "${THREADS[@]}"; do
     $BIN "$t" "$SLOW_MSGS" naive_slowsink_producer | tail -n +2
